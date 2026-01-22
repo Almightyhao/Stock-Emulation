@@ -3,37 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>藥品庫存模擬分析工具 v2.0</title>
+    <title>藥品庫存模擬分析工具 v10.3</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f9; color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 20px; }
+        
+        .config-box { background: #fdf2e9; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f0c38e; text-align: center; }
+        .config-box label { font-weight: bold; font-size: 1.1em; color: #d35400; }
+        .config-box input { padding: 8px; border-radius: 4px; border: 1px solid #ccc; width: 60px; text-align: center; font-size: 1.1em; }
+
         .upload-section { text-align: center; padding: 40px; border: 2px dashed #3498db; border-radius: 10px; background-color: #ecf8ff; margin-bottom: 30px; }
-        .upload-btn { background-color: #3498db; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .upload-btn { background-color: #3498db; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; transition: background 0.3s; }
         .upload-btn:hover { background-color: #2980b9; }
         #fileInput { display: none; }
+        
         .summary-section, .chart-section { display: none; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background-color: #34495e; color: white; }
+        tr:hover { background-color: #f8f9fa; }
+        
         .controls { margin: 25px 0; padding: 20px; background: #ecf0f1; border-radius: 8px; display: flex; align-items: center; gap: 15px; }
-        select { padding: 10px; border-radius: 4px; border: 1px solid #bdc3c7; font-size: 16px; flex-grow: 1; }
+        select { padding: 10px; border-radius: 4px; border: 1px solid #bdc3c7; font-size: 16px; flex-grow: 1; outline: none; }
+        
         .chart-container { position: relative; height: 500px; width: 100%; margin-top: 20px; }
+        
         .badge { padding: 5px 10px; border-radius: 15px; font-size: 0.85em; color: #fff; display: inline-block; }
         .badge-red { background-color: #e74c3c; }
         .diff-pos { color: #27ae60; font-weight: bold; }
         .diff-neg { color: #e74c3c; font-weight: bold; }
         .error-msg { color: #e74c3c; text-align: center; margin-top: 10px; font-weight: bold; }
+        
+        .rules-box { background: #e8f6f3; padding: 15px; border-radius: 5px; margin-bottom: 20px; font-size: 0.9em; line-height: 1.6; border-left: 4px solid #1abc9c; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>💊 藥品庫存模擬分析工具 v2.0</h1>
+        <h1>💊 藥品庫存模擬分析工具 v10.3</h1>
         
+        <div class="config-box">
+            <label for="ltInput">🚚 廠商到貨天數 (Lead Time)：</label>
+            <input type="number" id="ltInput" value="1" min="0"> 
+            <span style="margin-left: 5px;">天</span>
+            <p style="font-size: 0.9em; color: #666; margin-top: 5px;">(0天 = 當日補貨/隨叫隨到；1天 = 隔日到貨)</p>
+        </div>
+
         <div class="upload-section" id="dropZone">
-            <p style="font-size: 1.2em; color: #555; margin-bottom: 15px;">請上傳 CSV 檔案</p>
+            <p style="font-size: 1.2em; color: #555; margin-bottom: 15px;">請上傳 CSV 檔案 (模擬Check.csv)</p>
             <input type="file" id="fileInput" accept=".csv">
             <button class="upload-btn" onclick="document.getElementById('fileInput').click()">📂 選擇檔案</button>
             <p id="fileName" style="margin-top: 10px; color: #7f8c8d;"></p>
@@ -42,13 +62,22 @@
 
         <div class="summary-section" id="summarySection">
             <h2 style="border-left: 5px solid #3498db; padding-left: 10px;">📊 模擬效益總覽</h2>
+            
+            <div class="rules-box">
+                <strong>📌 v10.3 修正邏輯：</strong><br>
+                1. <strong>開局急領修正</strong>：若初始庫存 <= 0，判定為 <span style="color:#e74c3c">★ 急領</span>。<br>
+                2. <strong>補貨數值</strong>：區分「當日補貨」與「預計補貨」。<br>
+                3. <strong>穩定性</strong>：保留 v10.2 的日期對齊與防錯機制。
+            </div>
+
             <table id="summaryTable">
                 <thead>
                     <tr>
                         <th>院內碼</th>
                         <th>藥名</th>
-                        <th>舊急領次數</th>
-                        <th>新急領次數 (模擬)</th>
+                        <th>舊急領 (Col C)</th>
+                        <th>新急領 (模擬)</th>
+                        <th>普通補貨 (次)</th>
                         <th>改善差異</th>
                         <th>備註</th>
                     </tr>
@@ -72,6 +101,14 @@
         let simulationResults = {};
         let myChart = null;
 
+        document.getElementById('ltInput').addEventListener('change', function(e) {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length > 0) {
+                const event = new Event('change');
+                fileInput.dispatchEvent(event);
+            }
+        });
+
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -79,73 +116,80 @@
             document.getElementById('fileName').textContent = `已選擇檔案: ${file.name}`;
             document.getElementById('errorMsg').textContent = '';
 
-            // 使用 PapaParse 解析 CSV，自動偵測編碼與分隔符
             Papa.parse(file, {
                 header: true,
                 skipEmptyLines: true,
-                encoding: "UTF-8", // 嘗試 UTF-8，若亂碼可改 Big5
+                encoding: "UTF-8", 
                 complete: function(results) {
                     if (results.data && results.data.length > 0) {
                         try {
-                            console.log("解析成功，第一筆資料:", results.data[0]); // Debug用
-                            runSimulation(results.data);
+                            runSimulation(results);
                             document.getElementById('summarySection').style.display = 'block';
                             document.getElementById('chartSection').style.display = 'block';
                         } catch (err) {
                             console.error(err);
-                            document.getElementById('errorMsg').textContent = '程式執行錯誤: ' + err.message;
+                            document.getElementById('errorMsg').textContent = '執行錯誤: ' + err.message;
                         }
-                    } else {
-                        document.getElementById('errorMsg').textContent = 'CSV 檔案內容為空或無法識別';
                     }
-                },
-                error: function(err) {
-                    document.getElementById('errorMsg').textContent = 'CSV 解析失敗: ' + err.message;
                 }
             });
         });
 
         function parseNum(val) {
             if (!val) return 0;
-            const cleanVal = val.toString().replace(/,/g, '').trim(); // 去除千分位逗號
+            const cleanVal = val.toString().replace(/,/g, '').trim(); 
             const num = parseFloat(cleanVal);
             return isNaN(num) ? 0 : num;
         }
 
-        function runSimulation(data) {
+        function formatDateLabel(dateStr) {
+            if (dateStr === '11/30') return '11/30';
+            const date = new Date(dateStr);
+            if (isNaN(date.getTime())) return dateStr; 
+            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+            const d = date.getDate().toString().padStart(2, '0');
+            return `${m}/${d}`;
+        }
+
+        function runSimulation(parsedResult) {
+            const data = parsedResult.data;
+            const fields = parsedResult.meta.fields;
+            
+            const LT = parseInt(document.getElementById('ltInput').value) || 0;
+
+            const colID = fields[0];
+            const colName = fields[1];
+            const colOldUrgent = fields[2]; 
+            const colInitStock = fields[3];
+            const colMaxCap = fields[4];
+            const colUnit = fields[5];
+            const colMin = fields[6];
+            const colSafety = fields[7];
+            const colBasis = fields[8];
+
+            let dateKeys = fields.filter(k => (k.includes('202') && (k.includes('-') || k.includes('/'))));
+            if (dateKeys.length === 0) dateKeys = fields.slice(9); 
+            dateKeys.sort((a, b) => new Date(a) - new Date(b));
+
             const tableBody = document.querySelector('#summaryTable tbody');
             const select = document.getElementById('drugSelect');
-            
             tableBody.innerHTML = ''; 
             select.innerHTML = ''; 
             simulationResults = {}; 
 
-            // 1. 偵測日期欄位 (關鍵修正)
-            // 尋找 key 中包含 "202" (年份) 且包含 "-" 或 "/" 的欄位
-            const sampleRow = data[0];
-            let dateKeys = Object.keys(sampleRow).filter(k => (k.includes('202') && (k.includes('-') || k.includes('/'))));
-            
-            if (dateKeys.length === 0) {
-                throw new Error("找不到日期欄位 (例如 2025-12-01 或 2025/12/01)。請檢查 CSV 表頭。");
-            }
-            
-            // 排序日期 (確保時間軸正確)
-            dateKeys.sort((a, b) => new Date(a) - new Date(b));
-            console.log("偵測到的日期欄位:", dateKeys);
-
             data.forEach(row => {
-                const drugId = row['院內碼'] || row['\ufeff院內碼']; // 處理 UTF-8 BOM
-                const drugName = row['藥名'];
-                
-                if (!drugId) return; // 跳過空行
+                const drugId = row[colID];
+                const drugName = row[colName];
+                if (!drugId) return;
 
-                const initialStock = parseNum(row['初始庫儲量']);
-                const requestUnit = parseNum(row['申領單位']) || 1;
-                const oldUrgent = parseNum(row['舊急領次數']);
-                const newMin = parseNum(row['最低庫儲量']);
-                const sysBasis = parseNum(row['系統基準量']);
-                const maxCapRaw = row['最大庫儲區的量'];
+                const oldUrgent = parseNum(row[colOldUrgent]);
+                const initialStock = parseNum(row[colInitStock]);
+                const requestUnit = parseNum(row[colUnit]) || 1;
+                const minStock = parseNum(row[colMin]);
+                const safetyStock = parseNum(row[colSafety]);
+                const sysBasis = parseNum(row[colBasis]);
                 
+                const maxCapRaw = row[colMaxCap];
                 let maxCap = 999999;
                 let hasMaxCap = false;
                 if (maxCapRaw && maxCapRaw.toString().trim() !== '') {
@@ -153,102 +197,157 @@
                     hasMaxCap = true;
                 }
 
-                // 模擬邏輯
                 let currentStock = initialStock;
                 let newUrgentCount = 0;
+                let newRegularCount = 0; 
                 let pendingQty = 0;
                 let daysToArrival = -1;
-                const LT = 2; 
                 
-                // 補貨目標設定
-                // 若有設定最大容量，目標就是最大容量 (不能爆倉)
-                // 若無，則目標是 系統基準量
-                // 但要確保目標 >= 觸發點 (否則永遠不會補)
-                const triggerVal = newMin;
+                const triggerVal = Math.max(minStock, safetyStock);
                 let targetLevel = hasMaxCap ? maxCap : Math.max(sysBasis, triggerVal);
-                if (targetLevel < triggerVal) targetLevel = triggerVal + requestUnit; // 防呆
+                if (targetLevel <= triggerVal) targetLevel = triggerVal + requestUnit;
 
-                const dailyRecords = [];
-                const urgentPoints = [];
+                const rawDates = ['11/30'].concat(dateKeys);
+                const displayDates = rawDates.map(formatDateLabel);
+                const dailyStock = [initialStock];
+                const dailyConsumption = [0]; 
+                
+                const urgentPoints = []; 
+                const regularPoints = [];
 
-                dateKeys.forEach(date => {
-                    const consumption = parseNum(row[date]);
-                    
-                    currentStock -= consumption;
-                    
-                    let isUrgent = false;
-                    if (currentStock < 0) {
-                        isUrgent = true;
-                        newUrgentCount++;
-                        currentStock = 0; 
+                let maxDataValue = initialStock; 
+
+                // --- 1. 開局檢查 (Day 0) ---
+                let day0Urgent = { x: displayDates[0], y: null };
+                let day0Regular = { x: displayDates[0], y: null };
+
+                if (currentStock <= triggerVal) {
+                    let diff = targetLevel - currentStock;
+                    if (diff > 0) {
+                        let qty = Math.ceil(diff / requestUnit) * requestUnit;
+                        if (hasMaxCap && (currentStock + qty > maxCap)) {
+                            let space = maxCap - currentStock;
+                            qty = Math.floor(space / requestUnit) * requestUnit;
+                        }
+                        
+                        let triggerLevel = currentStock; 
+                        
+                        // v10.3 修正：若初始 <= 0，強制判為急領
+                        if (currentStock <= 0) {
+                            newUrgentCount++; 
+                            currentStock += qty; 
+                            day0Urgent = { x: displayDates[0], y: currentStock, trigger: triggerLevel, qty: qty, isPending: false };
+                        } else {
+                            newRegularCount++;
+                            currentStock += qty; 
+                            day0Regular = { x: displayDates[0], y: currentStock, trigger: triggerLevel, qty: qty, isPending: false };
+                        }
                     }
+                }
+                if (currentStock > maxDataValue) maxDataValue = currentStock;
+                
+                urgentPoints.push(day0Urgent);
+                regularPoints.push(day0Regular);
+
+                // --- 2. 逐日模擬 ---
+                dateKeys.forEach((date, i) => {
+                    const currentDateLabel = displayDates[i + 1];
+                    let dayUrgent = { x: currentDateLabel, y: null };
+                    let dayRegular = { x: currentDateLabel, y: null };
+
+                    const consumption = parseNum(row[date]);
+                    dailyConsumption.push(consumption); 
+                    if (consumption > maxDataValue) maxDataValue = consumption; 
                     
+                    if (daysToArrival > 0) {
+                        daysToArrival--;
+                    }
                     if (daysToArrival === 0) {
                         currentStock += pendingQty;
                         pendingQty = 0;
                         daysToArrival = -1;
-                    } else if (daysToArrival > 0) {
-                        daysToArrival--;
                     }
+
+                    let isUrgent = false;
+                    if (consumption > currentStock) {
+                        isUrgent = true;
+                        newUrgentCount++;
+                    }
+
+                    currentStock -= consumption;
+                    if (currentStock < 0) currentStock = 0; 
                     
+                    let isRegularRestock = false;
+                    let restockQty = 0;
+                    let triggerLevel = currentStock;
+
                     if (daysToArrival === -1 && currentStock <= triggerVal) {
                         let diff = targetLevel - currentStock;
-                        
                         if (diff > 0) {
-                            let qty = Math.floor(diff / requestUnit) * requestUnit;
-                            
-                            // 最小補貨量保護
-                            if (qty === 0 && diff > 0) {
-                                if (!hasMaxCap || (currentStock + requestUnit <= maxCap)) {
-                                    qty = requestUnit;
-                                }
-                            }
-                            
-                            // 容量限制再次檢查
+                            let qty = Math.ceil(diff / requestUnit) * requestUnit;
                             if (hasMaxCap && (currentStock + qty > maxCap)) {
                                 let space = maxCap - currentStock;
                                 qty = Math.floor(space / requestUnit) * requestUnit;
                             }
                             
                             if (qty > 0) {
-                                pendingQty = qty;
-                                daysToArrival = LT;
+                                restockQty = qty;
+                                if (LT === 0) {
+                                    currentStock += qty;
+                                    if (!isUrgent) {
+                                        isRegularRestock = true; 
+                                        newRegularCount++;
+                                    }
+                                } else {
+                                    pendingQty = qty;
+                                    daysToArrival = LT - 1; 
+                                    if (!isUrgent) {
+                                        isRegularRestock = true;
+                                        newRegularCount++;
+                                    }
+                                }
                             }
                         }
                     }
                     
-                    dailyRecords.push(currentStock);
-                    urgentPoints.push(isUrgent ? currentStock : null);
+                    dailyStock.push(currentStock);
+                    if (currentStock > maxDataValue) maxDataValue = currentStock;
+
+                    if (isUrgent) {
+                        dayUrgent = { x: currentDateLabel, y: currentStock, trigger: triggerLevel, qty: restockQty > 0 ? restockQty : "緊急補足", isPending: LT > 0 };
+                    } else if (isRegularRestock) {
+                        if (LT === 0) {
+                            dayRegular = { x: currentDateLabel, y: currentStock, trigger: triggerLevel, qty: restockQty, isPending: false };
+                        } else {
+                            dayRegular = { x: currentDateLabel, y: triggerLevel, trigger: triggerLevel, qty: restockQty, isPending: true };
+                        }
+                    }
+                    
+                    urgentPoints.push(dayUrgent);
+                    regularPoints.push(dayRegular);
                 });
+
+                maxDataValue = Math.ceil(maxDataValue * 1.1);
 
                 simulationResults[drugId] = {
                     name: drugName,
-                    dates: dateKeys,
-                    stockData: dailyRecords,
-                    urgentData: urgentPoints
+                    dates: displayDates,
+                    stockData: dailyStock,
+                    consumptionData: dailyConsumption,
+                    urgentData: urgentPoints,
+                    regularData: regularPoints,
+                    triggerVal: triggerVal,
+                    maxCap: hasMaxCap ? maxCap : null,
+                    maxValue: maxDataValue
                 };
 
                 const tr = document.createElement('tr');
                 const diff = oldUrgent - newUrgentCount;
-                
-                let diffHtml = '';
-                if (diff > 0) diffHtml = `<span class="diff-pos">▼ ${diff} (改善)</span>`;
-                else if (diff < 0) diffHtml = `<span class="diff-neg">▲ ${Math.abs(diff)} (惡化)</span>`;
-                else diffHtml = `<span style="color:gray">-</span>`;
-                
-                let noteHtml = '';
-                if (hasMaxCap && newMin >= maxCap) {
-                    noteHtml = `<span class="badge badge-red">容量限制風險</span>`;
-                }
+                let diffHtml = diff > 0 ? `<span class="diff-pos">▼ ${diff} (改善)</span>` : 
+                               (diff < 0 ? `<span class="diff-neg">▲ ${Math.abs(diff)} (惡化)</span>` : `<span style="color:gray">-</span>`);
+                let noteHtml = (hasMaxCap && triggerVal >= maxCap) ? `<span class="badge badge-red">容量不足</span>` : ``;
 
-                tr.innerHTML = `
-                    <td>${drugId}</td>
-                    <td>${drugName}</td>
-                    <td>${oldUrgent}</td>
-                    <td>${newUrgentCount}</td>
-                    <td>${diffHtml}</td>
-                    <td>${noteHtml}</td>
-                `;
+                tr.innerHTML = `<td>${drugId}</td><td>${drugName}</td><td>${oldUrgent}</td><td>${newUrgentCount}</td><td>${newRegularCount}</td><td>${diffHtml}</td><td>${noteHtml}</td>`;
                 tableBody.appendChild(tr);
 
                 const option = document.createElement('option');
@@ -267,37 +366,92 @@
             const select = document.getElementById('drugSelect');
             const drugId = select.value;
             const data = simulationResults[drugId];
-            
             if (!data) return;
 
             const ctx = document.getElementById('stockChart').getContext('2d');
-            
             if (myChart) myChart.destroy();
 
+            const triggerLine = new Array(data.dates.length).fill(data.triggerVal);
+            const maxCapLine = data.maxCap ? new Array(data.dates.length).fill(data.maxCap) : [];
+            const commonMax = data.maxValue;
+
             myChart = new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
                     labels: data.dates,
                     datasets: [
                         {
-                            label: '新系統庫存 (模擬)',
+                            type: 'line',
+                            label: '庫存量',
                             data: data.stockData,
                             borderColor: '#2ecc71',
                             backgroundColor: 'rgba(46, 204, 113, 0.1)',
-                            borderWidth: 3,
+                            borderWidth: 2,
                             tension: 0.1,
                             fill: true,
-                            pointRadius: 0
+                            pointRadius: (ctx) => (ctx.dataIndex === 0 ? 5 : 0),
+                            pointBackgroundColor: (ctx) => (ctx.dataIndex === 0 ? '#3498db' : 'transparent'),
+                            yAxisID: 'y',
+                            order: 1
                         },
                         {
-                            label: '急領發生點',
+                            type: 'bar',
+                            label: '每日耗用',
+                            data: data.consumptionData,
+                            backgroundColor: 'rgba(52, 152, 219, 0.3)', 
+                            borderColor: '#2980b9',
+                            borderWidth: 1,
+                            yAxisID: 'y',
+                            order: 2
+                        },
+                        {
+                            type: 'line',
+                            label: '觸發線',
+                            data: triggerLine,
+                            borderColor: '#f39c12',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y',
+                            order: 3
+                        },
+                        {
+                            type: 'line',
+                            label: '容量上限',
+                            data: maxCapLine,
+                            borderColor: '#e74c3c',
+                            borderWidth: 1,
+                            borderDash: [2, 2],
+                            pointRadius: 0,
+                            fill: false,
+                            hidden: !data.maxCap,
+                            yAxisID: 'y',
+                            order: 3
+                        },
+                        {
+                            type: 'line', 
+                            label: '急領 (Stockout)',
                             data: data.urgentData,
                             backgroundColor: '#e74c3c',
                             borderColor: '#e74c3c',
                             pointStyle: 'star',
-                            pointRadius: 10,
-                            type: 'scatter',
-                            showLine: false
+                            pointRadius: 12,
+                            showLine: false,
+                            yAxisID: 'y',
+                            order: 0
+                        },
+                        {
+                            type: 'line',
+                            label: '普通申領 (Restock)',
+                            data: data.regularData,
+                            backgroundColor: '#3498db',
+                            borderColor: '#2980b9',
+                            pointStyle: 'circle',
+                            pointRadius: 6,
+                            showLine: false,
+                            yAxisID: 'y',
+                            order: 0
                         }
                     ]
                 },
@@ -306,20 +460,41 @@
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
-                        title: { display: true, text: `逐日庫存走勢: ${data.name}`, font: { size: 18 } },
+                        title: { display: true, text: `逐日庫存 vs 耗用走勢: ${data.name}`, font: { size: 18 } },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
                                     let label = context.dataset.label || '';
-                                    if (context.parsed.y !== null) label += ': ' + context.parsed.y;
+                                    if (context.raw && context.raw.y !== undefined) {
+                                        if (context.raw.qty !== undefined) {
+                                            const type = context.dataset.label.includes('急領') ? '急領' : '普通申領';
+                                            const afterStock = context.raw.isPending ? context.raw.trigger + context.raw.qty : context.raw.y;
+                                            const note = context.raw.isPending ? " (預計)" : "";
+                                            label += `: 觸發:${context.raw.trigger} ➔ 補後${note}:${afterStock} (補貨量: +${context.raw.qty})`;
+                                        } else {
+                                            label += ': ' + context.raw.y;
+                                        }
+                                    } else if (typeof context.raw === 'number') {
+                                        label += ': ' + context.raw;
+                                    }
                                     return label;
                                 }
                             }
                         }
                     },
                     scales: {
-                        y: { beginAtZero: true, title: { display: true, text: '庫存量' } },
-                        x: { ticks: { maxTicksLimit: 10 } }
+                        x: {
+                            ticks: { autoSkip: true, maxRotation: 0, maxTicksLimit: 15 },
+                            grid: { offset: true }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: '數量 (庫存/耗用)' },
+                            beginAtZero: true,
+                            max: commonMax
+                        }
                     }
                 }
             });
